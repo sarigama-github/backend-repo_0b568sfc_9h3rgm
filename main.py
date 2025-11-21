@@ -1,8 +1,10 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, EmailStr, Field
+from database import create_document
 
-app = FastAPI()
+app = FastAPI(title="Aurora Animation Studio API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -11,6 +13,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class ContactMessage(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+    email: EmailStr
+    company: str | None = None
+    message: str = Field(..., min_length=10, max_length=2000)
 
 @app.get("/")
 def read_root():
@@ -31,39 +39,33 @@ def test_database():
         "connection_status": "Not Connected",
         "collections": []
     }
-    
     try:
-        # Try to import database module
         from database import db
-        
         if db is not None:
             response["database"] = "✅ Available"
-            response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
+            response["database_name"] = getattr(db, 'name', None) or ("✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set")
             response["connection_status"] = "Connected"
-            
-            # Try to list collections to verify connectivity
             try:
                 collections = db.list_collection_names()
-                response["collections"] = collections[:10]  # Show first 10 collections
+                response["collections"] = collections[:10]
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
                 response["database"] = f"⚠️  Connected but Error: {str(e)[:50]}"
         else:
             response["database"] = "⚠️  Available but not initialized"
-            
-    except ImportError:
-        response["database"] = "❌ Database module not found (run enable-database first)"
     except Exception as e:
         response["database"] = f"❌ Error: {str(e)[:50]}"
-    
-    # Check environment variables
-    import os
-    response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
-    response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
-    
     return response
 
+@app.post("/contact")
+def submit_contact(message: ContactMessage):
+    """Store contact inquiry in the database"""
+    try:
+        doc_id = create_document("contactmessage", message)
+        return {"ok": True, "id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
